@@ -45,7 +45,7 @@ class Config:
         config = configparser.ConfigParser(interpolation=None)
         config.read(config_file, encoding='utf-8')
 
-        confsections = {"Credentials", "Permissions", "Chat", "MusicBot"}.difference(config.sections())
+        confsections = {"Credentials", "Permissions", "Chat", "MusicBot", "Spotify"}.difference(config.sections())
         if confsections:
             raise HelpfulError(
                 "One or more required config sections are missing.",
@@ -81,6 +81,12 @@ class Config:
 
         self.blacklist_file = config.get('Files', 'BlacklistFile', fallback=ConfigDefaults.blacklist_file)
         self.auto_playlist_file = config.get('Files', 'AutoPlaylistFile', fallback=ConfigDefaults.auto_playlist_file)
+
+        self.enable_spotify = config.getboolean('Spotify', 'EnableSpotify', fallback=ConfigDefaults.enable_spotify)
+        self.spotify_client_id = config.get('Spotify', 'ClientID', fallback=ConfigDefaults.spotify_client_id)
+        self.spotify_client_secret = config.get('Spotify', 'ClientSecret', fallback=ConfigDefaults.spotify_client_secret)
+        self.spotify_username = config.get('Spotify', 'Username', fallback=ConfigDefaults.spotify_username)
+        self.spotify_redirect_uri = config.get('Spotify', 'RedirectURI', fallback=ConfigDefaults.spotify_redirect_uri)
 
         self.run_checks()
 
@@ -159,6 +165,34 @@ class Config:
 
         self.autojoin_channels = set(item.replace(',', ' ').strip() for item in self.autojoin_channels)
 
+        if self.enable_spotify:
+            if not self.spotify_client_id:
+                raise HelpfulError(
+                    "No Spotify client ID set, but Spotify recommendation was enabled.",
+                    "Please either fill in ClientID with a client ID (obtainable from the Spotify developer website)"
+                    "or turn off Spotify recommendations.",
+                preface=confpreface)
+            if not self.spotify_client_secret:
+                raise HelpfulError(
+                    "No Spotify client secret set, but Spotify recommendataion was enabled.",
+                    "Please either fill in ClientSecret with a client secret "
+                    "(obtainable from the Spotify developer website) or turn off Spotify recommendations.",
+                    preface=confpreface)
+            if not self.spotify_username:
+                raise HelpfulError(
+                    "No Spotify username set, but Spotify recommendation was enabled.",
+                    "Please either fill in SpotifyUsername with your Spotify username, or turn off Spotify"
+                    "recommendations.",
+                    preface=confpreface
+                )
+            if not self.spotify_redirect_uri:
+                raise HelpfulError(
+                    "No Spotify redirect URI set, but Spotify recommendation was enabled.",
+                    "Please either fill in RedirectURI in a way as described by config, or turn off Spotify"
+                    "recommendations.",
+                    preface=confpreface
+                )
+
     # TODO: Add save function for future editing of options with commands
     #       Maybe add warnings about fields missing from the config file
 
@@ -187,6 +221,12 @@ class ConfigDefaults:
     delete_messages = True
     delete_invoking = False
     debug_mode = False
+
+    enable_spotify = False
+    spotify_client_id = None
+    spotify_client_secret = None
+    spotify_username = None
+    spotify_redirect_uri = None
 
     options_file = 'config/options.ini'
     blacklist_file = 'config/blacklist.txt'

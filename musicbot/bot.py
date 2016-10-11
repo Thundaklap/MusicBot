@@ -28,8 +28,11 @@ from musicbot.config import Config, ConfigDefaults
 from musicbot.permissions import Permissions, PermissionsDefaults
 from musicbot.utils import load_file, write_file, sane_round_int
 
+from spotipy import util as spotipy_util
+
 from . import exceptions
 from . import downloader
+from . import spotify
 from .opus_loader import load_opus_lib
 from .constants import VERSION as BOTVERSION
 from .constants import DISCORD_MSG_CHAR_LIMIT, AUDIO_CACHE_PATH
@@ -413,34 +416,58 @@ class MusicBot(discord.Client):
     async def on_player_stop(self, **_):
         await self.update_now_playing()
 
-    async def on_player_finished_playing(self, player, **_):
-        if not player.playlist.entries and not player.current_entry and self.config.auto_playlist:
-            while self.autoplaylist:
-                song_url = choice(self.autoplaylist)
-                info = await self.downloader.safe_extract_info(player.playlist.loop, song_url, download=False, process=False)
+    async def on_player_finished_playing(self, player, **kwargs):
+        if not player.playlist.entries and not player.current_entry:
+            entry = kwargs.get('entry')
+            if entry and self.config.enable_spotify and self.spotify:
 
-                if not info:
-                    self.autoplaylist.remove(song_url)
-                    self.safe_print("[Info] Removing unplayable song from autoplaylist: %s" % song_url)
-                    write_file(self.config.auto_playlist_file, self.autoplaylist)
-                    continue
+                recommendations = await self.spotify.recommend(player.playlist.loop, entry)
+                while recommendations:
+                    song_url = recommendations.pop()
+                    info = await self.downloader.safe_extract_info(player.playlist.loop, song_url, download=False, process=True)
 
-                if info.get('entries', None):  # or .get('_type', '') == 'playlist'
-                    pass  # Wooo playlist
-                    # Blarg how do I want to do this
+                    if not info:
+                        continue
 
-                # TODO: better checks here
-                try:
-                    await player.playlist.add_entry(song_url, channel=None, author=None)
-                except exceptions.ExtractionError as e:
-                    print("Error adding song from autoplaylist:", e)
-                    continue
+                    if not all(info.get('entries', [])):
+                        # empty list, no data - go on to the next
+                        continue
 
-                break
+                    try:
+                        await player.playlist.add_entry(info['entries'][0]['webpage_url'], channel=None, author=None)
+                    except exceptions.ExtractionError as e:
+                        print("Error adding song from Spotify recommendation:", e)
+                        continue
 
-            if not self.autoplaylist:
-                print("[Warning] No playable songs in the autoplaylist, disabling.")
-                self.config.auto_playlist = False
+                    return
+
+            if self.config.auto_playlist:
+                while self.autoplaylist:
+                    song_url = choice(self.autoplaylist)
+                    info = await self.downloader.safe_extract_info(player.playlist.loop, song_url, download=False, process=False)
+
+                    if not info:
+                        self.autoplaylist.remove(song_url)
+                        self.safe_print("[Info] Removing unplayable song from autoplaylist: %s" % song_url)
+                        write_file(self.config.auto_playlist_file, self.autoplaylist)
+                        continue
+
+                    if info.get('entries', None):  # or .get('_type', '') == 'playlist'
+                        pass  # Wooo playlist
+                        # Blarg how do I want to do this
+
+                    # TODO: better checks here
+                    try:
+                        await player.playlist.add_entry(song_url, channel=None, author=None)
+                    except exceptions.ExtractionError as e:
+                        print("Error adding song from autoplaylist:", e)
+                        continue
+
+                    break
+
+                if not self.autoplaylist:
+                    print("[Warning] No playable songs in the autoplaylist, disabling.")
+                    self.config.auto_playlist = False
 
     async def on_player_entry_added(self, playlist, entry, **_):
         pass
@@ -529,6 +556,13 @@ class MusicBot(discord.Client):
         else:
             return await super().edit_profile(self.config._password,**fields)
 
+    def _setup_spotify(self):
+        if self.config.enable_spotify:
+            # this only prompts if login never done before.
+            spotify_key = spotipy_util.prompt_for_user_token(self.config.spotify_username, None, self.config.spotify_client_id,
+                                                             self.config.spotify_client_secret, self.config.spotify_redirect_uri)
+            self.spotify = spotify.SpotifyIntegration(spotify_key)
+
     def _cleanup(self):
         try:
             self.loop.run_until_complete(self.logout())
@@ -547,6 +581,8 @@ class MusicBot(discord.Client):
 
     # noinspection PyMethodOverriding
     def run(self):
+        self._setup_spotify()
+
         try:
             self.loop.run_until_complete(self.start(*self.config.auth))
 
@@ -689,6 +725,7 @@ class MusicBot(discord.Client):
             print("    Delete Invoking: " + ['Disabled', 'Enabled'][self.config.delete_invoking])
         print("  Debug Mode: " + ['Disabled', 'Enabled'][self.config.debug_mode])
         print("  Downloaded songs will be %s" % ['deleted', 'saved'][self.config.save_videos])
+        print("  Spotify Recommendation: " + ['Disabled', 'Enabled'][self.config.enable_spotify])
         print()
 
         # maybe option to leave the ownerid blank and generate a random command for the owner to use
