@@ -25,7 +25,6 @@ class SpotifyIntegration:
         search_term = search_term.replace('-', '')
         search_term = search_term.replace('ft.', '')
         search_term = re.sub('\(.+?\)', '', search_term)
-        print("Search term: %s" % search_term)
         search_results = self.spotify.search(search_term)
 
         if 'tracks' not in search_results or 'items' not in search_results['tracks']:
